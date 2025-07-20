@@ -1,8 +1,8 @@
 // src/app.ts
 import express from 'express';
-import { PrismaClient } from '../src/generated/prisma';
-import { disconnect } from 'process';
-import { callNextBingoNumber, getCalledNumbers, resetBingoCaller } from './utils/bingoCaller';
+import { PrismaClient } from '@prisma/client';
+import path from 'path';
+import { callNextBingoNumber, generateBingoCard, getCalledNumbers, resetBingoCaller } from './utils/bingoCaller';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -10,9 +10,12 @@ const port = process.env.PORT || 3000;
 const prisma = new PrismaClient();
  
 app.use(express.json());
+app.use(express.static(path.join(__dirname, '../public')));
 
+// ルートパス('/')へのGETリクエストが来た時にindex.htmlを返す
 app.get('/', (req, res) => {
-  res.send('Hi! Everyone, how are you doing?');
+  // index.htmlのパスも同様に, dist/app.jsから見て public/index.html を指します
+  res.sendFile(path.join(__dirname, '../public', 'index.html'));
 });
 
 // usserを新しく作る処理
@@ -37,7 +40,7 @@ app.post('/users', async (req, res) => {
     res.status(500).json({ error: 'Failed to create user.'});
   }
 });
-// userを呼び出す処理
+// 全てのユーザーを取得するAPIエンドポイント
 app.get('/users', async (req, res) => {
   try {
     const users = await prisma.user.findMany({
@@ -56,7 +59,33 @@ app.get('/users', async (req, res) => {
 });
 
 // 次のビンゴ数字を抽選するAPIエンドポ
-app.post
+app.post('/api/bingo/call', (req, res) => {
+  const nextNumber = callNextBingoNumber();// bingoCaller.tsの関数を呼び出し
+  if (nextNumber === null) {
+    return res.status(200).json({ message: 'All numbers have been called.', number: null});
+  }
+  res.json({ number: nextNumber});
+});
+
+// 現在抽選済みの全ての数字を取得するAPIエンドポイント
+app.get('/api/bingo/called-numbers', (req, res) => {
+  const called = getCalledNumbers();// bingoCaller.tsの関数を呼び出し
+  res.json({ getCalledNumbers: called });
+});
+
+// ビンゴの抽選状態をリセットするAPIエンドポイント
+app.post('/api/bingo/reset', (req, res) => {
+  resetBingoCaller();// bingoCaller.ts の関数を呼び出し
+  res.status(200).json({ message: 'Bingo caller reset successfully.' });
+});
+
+// ビンゴカード生成APIエンドポイント
+// (クライアント側で generateBingoCard を直接インポートして使う場合、このAPIは必須ではありません。
+// しかし、サーバー経由でカードを生成する選択肢も提供できます。)
+app.get('/api/bingo/card', (req, res) => {
+  const newCard = generateBingoCard();// bingoCaller.ts の関数を呼び出し
+  res.json(newCard);
+});
 
 app.listen(port, () => {
   console.log(`Express app running on http://localhost:${port}`);

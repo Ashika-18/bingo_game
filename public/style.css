@@ -1,0 +1,78 @@
+/* public/style.css */
+body {
+    font-family: Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 50px;
+    background-color: #f0f0f0;
+}
+h1 {
+    color: #333;
+}
+#bingo-card {
+    display: grid;
+    grid-template-columns: repeat(5, 60px); /* 5列、各列60px */
+    grid-template-rows: repeat(5, 60px);    /* 5行、各行60px */
+    border: 2px solid #333;
+    background-color: #fff;
+    margin-top: 20px;
+}
+.bingo-cell {
+    width: 60px;
+    height: 60px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border: 1px solid #ccc;
+    font-size: 24px;
+    font-weight: bold;
+    box-sizing: border-box; /* paddingやborderをwidth/heightに含める */
+}
+.bingo-cell.free-space {
+    background-color: #fdd;
+    font-size: 18px;
+}
+.bingo-cell.marked {
+    background-color: #aaffaa; /* マークされたマスの色 */
+    color: #555;
+}
+.header-cell {
+    background-color: #666;
+    color: white;
+    font-size: 20px;
+    font-weight: bold;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border: 1px solid #ccc;
+}
+
+#called-number-display {
+    margin-top: 30px;
+    font-size: 30px;
+    font-weight: bold;
+    color: #007bff; /* 青色 */
+}
+
+#current-number {
+    font-size: 48px;
+    color: #dc3545; /* 赤色 */
+    margin-left: 15px;
+}
+
+button {
+    padding: 10px 20px;
+    font-size: 18px;
+    cursor: pointer;
+    margin: 10px;
+    border: none;
+    border-radius: 5px;
+    background-color: #007bff;
+    color: white;
+    transition: background-color 0.3s ease;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
