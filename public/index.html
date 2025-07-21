@@ -7,15 +7,32 @@
     <link rel="stylesheet" href="./style.css">
     </head>
 <body>
-    <h1>ビンゴゲーム</h1>
+    <h1>マルチプレイヤービンゴ</h1>
+
+    <div id="game-setup">
+        <label for="roomCodeInput">部屋番号:</label>
+        <input type="text" id="roomCodeInput" placeholder="部屋番号を入力" value="room1">
+        <button id="joinRoomButton">ゲームに参加</button>
+        <p id="roomStatus">未参加</p>
+    </div>
+
     <button id="generateCardButton">新しいカードを生成</button>
 
     <div id="called-number-display">
-        現在の数字: <span id="current-number">--</span>
+        現在の抽選数字: <span id="current-number">--</span>
     </div>
-    <button id="callNumberButton">数字を引く</button>
+    <button id="callNumberButton" disabled>数字を引く</button>
+    <button id="resetGameButton" disabled>ゲームをリセット</button>
+
     <div id="bingo-card">
         </div>
+
+    <div id="called-numbers-history">
+        <h3>抽選済み数字リスト:</h3>
+        <div id="history-list"></div>
+    </div>
+    
+    <script src="/socket.io/socket.io.js"></script>
     <script type="module" src="/script.js"></script>
 </body>
 </html>
