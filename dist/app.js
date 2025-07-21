@@ -16,18 +16,25 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const client_1 = require("@prisma/client");
 const path_1 = __importDefault(require("path"));
+const socket_io_1 = require("socket.io");
+const http_1 = __importDefault(require("http"));
 const bingoCaller_1 = require("./utils/bingoCaller");
 const app = (0, express_1.default)();
 const port = process.env.PORT || 3000;
+const server = http_1.default.createServer(app);
+const io = new socket_io_1.Server(server, {
+    cors: {
+        origin: "*", // 開発中は全てのoriginからの接続を許可(本番環境では制限すること)
+        methods: ["GET", "POST"]
+    }
+});
 const prisma = new client_1.PrismaClient();
 app.use(express_1.default.json());
 app.use(express_1.default.static(path_1.default.join(__dirname, '../public')));
-// ルートパス('/')へのGETリクエストが来た時にindex.htmlを返す
 app.get('/', (req, res) => {
-    // index.htmlのパスも同様に, dist/app.jsから見て public/index.html を指します
     res.sendFile(path_1.default.join(__dirname, '../public', 'index.html'));
 });
-// usserを新しく作る処理
+// ユーザー関連APIエンドポイント(変更なし)
 app.post('/users', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { phoneNumber, password } = req.body;
     if (!phoneNumber || !password) {
@@ -42,7 +49,7 @@ app.post('/users', (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         });
         res.status(201).json(newUser);
     }
-    catch (error) { // errorの型をanyに指定(必要に応じてより具体的に)
+    catch (error) {
         console.error('Error creating user:', error);
         if (error.code === 'P2002') {
             return res.status(409).json({ error: 'Phone number already exists.' });
@@ -50,12 +57,10 @@ app.post('/users', (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         res.status(500).json({ error: 'Failed to create user.' });
     }
 }));
-// 全てのユーザーを取得するAPIエンドポイント
 app.get('/users', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const users = yield prisma.user.findMany({
             select: {
-                id: true,
                 phoneNumber: true,
                 createdAt: true,
                 updatedAt: true,
@@ -64,43 +69,112 @@ app.get('/users', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         res.json(users);
     }
     catch (error) {
-        console.error('Error fetching users:', error);
+        console.error('Error fetching ussers:', error);
         res.status(500).json({ error: 'Failed to fetch users' });
     }
 }));
-// 次のビンゴ数字を抽選するAPIエンドポ
+// ビンゴ関連APIエンドポイント（HTTP APIとしては残しておくが、
+// 複数人ゲームのロジックはSocket.IOへ移行するため、使用頻度は減る可能性あり）
+// 次のビンゴ数字を抽選するAPIエンドポイント (roomCodeをクエリパラメータで受け取るように変更)
 app.post('/api/bingo/call', (req, res) => {
-    const nextNumber = (0, bingoCaller_1.callNextBingoNumber)(); // bingoCaller.tsの関数を呼び出し
+    const roomCode = req.body.roomCode || 'default'; // roomCode をリクエストボディから取得,無ければ 'default'
+    const nextNumber = (0, bingoCaller_1.callNextBingoNumber)(roomCode);
     if (nextNumber === null) {
         return res.status(200).json({ message: 'All numbers have been called.', number: null });
     }
     res.json({ number: nextNumber });
 });
-// 現在抽選済みの全ての数字を取得するAPIエンドポイント
+// 現在抽選済みの全ての数字を取得するAPIエンドポイント (roomCodeをクエリパラメータで受け取るように変更)
 app.get('/api/bingo/called-numbers', (req, res) => {
-    const called = (0, bingoCaller_1.getCalledNumbers)(); // bingoCaller.tsの関数を呼び出し
+    const roomCode = req.query.roomCode || 'default'; // roomCode をクエリパラメータから取得
+    const called = (0, bingoCaller_1.getCalledNumbers)(roomCode);
     res.json({ getCalledNumbers: called });
 });
-// ビンゴの抽選状態をリセットするAPIエンドポイント
+// ビンゴの抽選状態をリセットするAPIエンドポイント (roomCodeをリクエストボディで受け取るように変更)
 app.post('/api/bingo/reset', (req, res) => {
-    (0, bingoCaller_1.resetBingoCaller)(); // bingoCaller.ts の関数を呼び出し
+    const roomCode = req.body.roomCode || 'default'; // roomCode をリクエストボディから取得
+    (0, bingoCaller_1.resetBingoCaller)(roomCode);
     res.status(200).json({ message: 'Bingo caller reset successfully.' });
 });
 // ビンゴカード生成APIエンドポイント
-// (クライアント側で generateBingoCard を直接インポートして使う場合、このAPIは必須ではありません。
-// しかし、サーバー経由でカードを生成する選択肢も提供できます。)
 app.get('/api/bingo/card', (req, res) => {
-    const newCard = (0, bingoCaller_1.generateBingoCard)(); // bingoCaller.ts の関数を呼び出し
+    const newCard = (0, bingoCaller_1.generateBingoCard)();
     res.json(newCard);
 });
-app.listen(port, () => {
-    console.log(`Express app running on http://localhost:${port}`);
+// Socket.IOの接続イベントリスナー
+io.on('connection', (socket) => {
+    console.log(`A user connected: ${socket.id}`);
+    let currentRoom = null; // このソケットが現在参加している部屋
+    // クライアントが部屋に参加するイベント
+    socket.on('joinRoom', (roomCode) => {
+        // 既存の部屋から退出(もし参加していれば)
+        if (currentRoom) {
+            socket.leave(currentRoom);
+            console.log(`User ${socket.id} left room ${currentRoom}`);
+        }
+        // 新しい部屋に参加
+        socket.join(roomCode);
+        currentRoom = roomCode;
+        (0, bingoCaller_1.initializeSession)(roomCode); // セッションを初期化または取得
+        console.log(`User ${socket.id} joined room ${roomCode}`);
+        // 部屋に入ったクライアントに, 現在の抽選済み数字を送信
+        const called = (0, bingoCaller_1.getCalledNumbers)(roomCode);
+        socket.emit('currentCalledNumbers', called); // 個別のソケットに送信
+    });
+    //「数字を引く」ボタンが押されたときのイベント (Socket.IO経由)
+    socket.on('callNumber', () => {
+        if (!currentRoom) {
+            console.warn(`User ${socket.id} tried to call number without joining a room.`);
+            socket.emit('error', '部屋に参加してから数字を引いてください!');
+            return;
+        }
+        const nextNumber = (0, bingoCaller_1.callNextBingoNumber)(currentRoom);
+        if (nextNumber !== null) {
+            // その部屋の全員に, 次の抽選自体を送信
+            io.to(currentRoom).emit('bingoNumberCalled', nextNumber);
+            // その部屋の全員に,現在の抽選済み数字リストを更新して送信
+            const called = (0, bingoCaller_1.getCalledNumbers)(currentRoom);
+            io.to(currentRoom).emit('currentCalledNumbers', called);
+        }
+        else {
+            io.to(currentRoom).emit('gameEnded', '全ての数字が抽選されました!');
+        }
+    });
+    // 「ビンゴ状態をリセット」イベント (部屋単位でリセット)
+    socket.on('resetGame', () => {
+        if (!currentRoom) {
+            console.warn(`User ${socket.id} tried to reset game without joining a room.`);
+            socket.emit('error', '部屋に参加してからレームをリセットしてください!');
+            return;
+        }
+        (0, bingoCaller_1.resetBingoCaller)(currentRoom); // 特定の部屋だけリセット
+        // クライアント側でカードを生成するため, サーバー側ロジックのみリセット
+        io.to(currentRoom).emit('gameReset', { message: 'ゲームがリセットされました! 新しいカードを生成してください!' });
+    });
+    socket.on('disconnect', () => {
+        console.log(`User disconnected: ${socket.id}`);
+        if (currentRoom) {
+            // 部屋からユーザーが全ていなくなったらセッションをクリーンアップするロジックをここに追加しても良い
+            console.log(`User ${socket.id} left room ${currentRoom}`);
+        }
+    });
+});
+// Expressのlistenではなく、HTTPサーバーのlistenを使用
+server.listen(port, () => {
+    console.log(`Express app running on http://lovalhost:${port}`);
+    console.log(`Socket.IO server running on http://localhost:${port}`);
 });
 process.on('SIGINT', () => __awaiter(void 0, void 0, void 0, function* () {
     yield prisma.$disconnect();
-    process.exit(0);
+    server.close(() => {
+        console.log('HTTP sever closed!');
+        process.exit(0);
+    });
 }));
 process.on('SIGTERM', () => __awaiter(void 0, void 0, void 0, function* () {
     yield prisma.$disconnect();
-    process.exit(0);
+    server.close(() => {
+        console.log('HTTP server closed!');
+        process.exit(0);
+    });
 }));

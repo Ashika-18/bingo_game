@@ -137,11 +137,14 @@ io.on('connection', (socket) => {
     }
     const nextNumber = callNextBingoNumber(currentRoom);
     if (nextNumber !== null) {
-      // その部屋の全員に現在の抽選済み数字リストを更新して送信
+      // その部屋の全員に, 次の抽選自体を送信
+      io.to(currentRoom).emit('bingoNumberCalled', nextNumber);
+
+      // その部屋の全員に,現在の抽選済み数字リストを更新して送信
       const called = getCalledNumbers(currentRoom);
       io.to(currentRoom).emit('currentCalledNumbers', called);
     } else {
-      io.to(currentRoom).emit('gameEnded', '全ての数字が抽選されました');
+      io.to(currentRoom).emit('gameEnded', '全ての数字が抽選されました!');
     }
   });
   // 「ビンゴ状態をリセット」イベント (部屋単位でリセット)
@@ -172,7 +175,7 @@ server.listen(port, () => {
 });
 
 process.on('SIGINT', async () => {
-  await prisma.$dissconnect();
+  await prisma.$disconnect();
   server.close(() => {
     console.log('HTTP sever closed!');
     process.exit(0);
