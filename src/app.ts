@@ -19,7 +19,7 @@ const port = process.env.PORT || 3000;
 const server = http.createServer(app);
 const io = new SocketIOServer(server, {
   cors: {
-    origin: "*",// 開発中は全てのoriginからの接続を許可(本番環境では制限すること)
+    origin: process.env.CLIENT_ORIGIN || "*",// 開発中は全てのoriginからの接続を許可(本番環境では制限すること)
     methods: ["GET", "POST"]
   }
 });
