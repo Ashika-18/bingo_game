@@ -10,7 +10,12 @@ import {
   callNextBingoNumber,
   generateBingoCard,
   getCalledNumbers,
-  resetBingoCaller
+  resetBingoCaller,
+  addPlayerToSession,
+  markNumberOnPlayerCard,
+  checkBingo,
+  PlayerBingoCard,
+  BingoCell
 } from './utils/bingoCaller';
 
 const app = express();
@@ -71,33 +76,6 @@ app.get('/users', async (req, res) => {
   }
 });
 
-// ビンゴ関連APIエンドポイント（HTTP APIとしては残しておくが、
-// 複数人ゲームのロジックはSocket.IOへ移行するため、使用頻度は減る可能性あり）
-
-// 次のビンゴ数字を抽選するAPIエンドポイント (roomCodeをクエリパラメータで受け取るように変更)
-app.post('/api/bingo/call', (req, res) => {
-  const roomCode = req.body.roomCode || 'default';// roomCode をリクエストボディから取得,無ければ 'default'
-  const nextNumber = callNextBingoNumber(roomCode);
-  if (nextNumber === null) {
-    return res.status(200).json({ message: 'All numbers have been called.', number: null});
-  }
-  res.json({ number: nextNumber});
-});
-
-// 現在抽選済みの全ての数字を取得するAPIエンドポイント (roomCodeをクエリパラメータで受け取るように変更)
-app.get('/api/bingo/called-numbers', (req, res) => {
-  const roomCode = req.query.roomCode as string || 'default';// roomCode をクエリパラメータから取得
-  const called = getCalledNumbers(roomCode);
-  res.json({ getCalledNumbers: called});
-});
-
-// ビンゴの抽選状態をリセットするAPIエンドポイント (roomCodeをリクエストボディで受け取るように変更)
-app.post('/api/bingo/reset', (req, res) => {
-  const roomCode = req.body.roomCode || 'default';// roomCode をリクエストボディから取得
-  resetBingoCaller(roomCode);
-  res.status(200).json({ message: 'Bingo caller reset successfully.'});
-});
-
 // ビンゴカード生成APIエンドポイント
 app.get('/api/bingo/card', (req, res) => {
   const newCard = generateBingoCard();
@@ -111,59 +89,120 @@ io.on('connection', (socket) => {
   let currentRoom: string | null = null;// このソケットが現在参加している部屋
 
   // クライアントが部屋に参加するイベント
-  socket.on('joinRoom', (roomCode: string) => {
+  socket.on('joinRoom', (roomCode: string, callBack: (card: PlayerBingoCard | null, calledNumbers: number[]) => void) => {
     // 既存の部屋から退出(もし参加していれば)
-    if (currentRoom) {
+    if (currentRoom && currentRoom !== roomCode) {
       socket.leave(currentRoom);
       console.log(`User ${socket.id} left room ${currentRoom}`);
+      io.to(currentRoom).emit('playerLeft', socket.id);// 部屋の他のメンバーに通知
     }
+
     // 新しい部屋に参加
     socket.join(roomCode);
     currentRoom = roomCode;
-    initializeSession(roomCode);// セッションを初期化または取得
     console.log(`User ${socket.id} joined room ${roomCode}`);
 
-    // 部屋に入ったクライアントに, 現在の抽選済み数字を送信
-    const called = getCalledNumbers(roomCode);
-    socket.emit('currentCalledNumbers', called)// 個別のソケットに送信
+    const playerCard = addPlayerToSession(roomCode, socket.id);// プレイヤーをセッションに追加しカードを取得
+    const called = getCalledNumbers(roomCode);// 現在の呼ばれた数字を取得
+
+    // 参加したクライアントに、生成されたカードと現在の呼ばれた数字を送信
+    callBack(playerCard, called);
+
+    // 部屋の他のメンバーにプレイヤーが参加したことを通知
+    socket.to(roomCode).emit('PlayerJoined', socket.id);
   });
 
   //「数字を引く」ボタンが押されたときのイベント (Socket.IO経由)
-  socket.on('callNumber', () => {
+  socket.on('callNumber', (roomCode: string) => {
     if (!currentRoom) {
       console.warn(`User ${socket.id} tried to call number without joining a room.`);
       socket.emit('error', '部屋に参加してから数字を引いてください!');
       return; 
     }
-    const nextNumber = callNextBingoNumber(currentRoom);
-    if (nextNumber !== null) {
-      // その部屋の全員に, 次の抽選自体を送信
-      io.to(currentRoom).emit('bingoNumberCalled', nextNumber);
 
-      // その部屋の全員に,現在の抽選済み数字リストを更新して送信
-      const called = getCalledNumbers(currentRoom);
-      io.to(currentRoom).emit('currentCalledNumbers', called);
+    // bingoCaller.ts の callNextBingoNumber は内部でカード更新とビンゴ判定も行います
+    const nextNumber = callNextBingoNumber(roomCode);
+
+    if (nextNumber !== null) {
+      console.log(`New number called: ${nextNumber} in room ${roomCode}`);
+      // その部屋の全員に、次の抽選された数字と現在の抽選済み数字リストを更新して送信
+      const called = getCalledNumbers(roomCode);
+      io.to(roomCode).emit('bingoNumberCalled', { number: nextNumber, calledNumbers: called});
+
+      // プレイヤーのビンゴ状態をチェックし、必要に応じて通知
+      const session = initializeSession(roomCode);// 最新のセッション状態を取得
+      session.players.forEach(player => {
+        if (player.isBingo) {
+          // ビンゴしたプレイヤーがいれば、ルーム全体に通知
+          io.to(roomCode).emit('playerBingoAnnounce', { playerId: player.id});
+        }
+      });
+
     } else {
-      io.to(currentRoom).emit('gameEnded', '全ての数字が抽選されました!');
+      // 全ての数字が呼ばれたら、ゲーム終了を通知
+      io.to(roomCode).emit('gameEnded', '全ての数字が抽選されました!');
     }
   });
+
+  // プレイヤーがカードのセルをマークするイベント
+  socket.on('markCell', (roomCode: string, value: number, callBack: (success: boolean, updatedCard?: PlayerBingoCard, isBingo?: boolean) => void) => {
+    const session = initializeSession(roomCode);
+    const player = session.players.get(socket.id);
+
+    if (!player) {
+      console.warn(`Player ${socket.id} not found in session ${roomCode} for marking cell.`);
+      return callBack(false);
+    }
+    // 既に呼ばれた数字かどうかを確認 (不正なマークを防ぐため)
+    if (!session.calledNumbers.includes(value)) {
+      console.warn(`Number ${value} has not been called yet in room ${roomCode}.Player ${socket.id} attempted to mark. `);
+      return callBack(false, player.card, player.isBingo);
+    }
+
+    // markNumberOnPlayerCard を使ってカードを更新
+    const wasMarked = markNumberOnPlayerCard(player.card, value);
+
+    if (wasMarked) {
+      // マークが成功した場合、ビンゴ判定
+      if (!player.isBingo && checkBingo(player.card)) {
+        player.isBingo = true;// プレイヤーのビンゴ状態を更新
+        console.log(`Player ${socket.id} achived BINGO in room ${roomCode}!`);
+        io.to(roomCode).emit('playerBingoAnnounce', { playerId: socket.id});// ルーム全体にビンゴを通知
+      }
+      // マーク成功と更新されたカード、ビンゴ状態をクライアントに返す
+      callBack(true, player.card, player.isBingo);
+      // 他のクライアントにもこのプレイヤーのカードが更新されたことを通知しても良い
+      io.to(roomCode).emit('playerCardMarked', { playerId: socket.id, card: player.card});
+    } else {
+      // マーク失敗(既にマーク済みなど)
+      callBack(false, player.card, player.isBingo);
+    }
+  });
+
   // 「ビンゴ状態をリセット」イベント (部屋単位でリセット)
-  socket.on('resetGame', () => {
-    if (!currentRoom) {
+  socket.on('resetGame', (roomCode: string) => {
+    if (!roomCode) {
       console.warn(`User ${socket.id} tried to reset game without joining a room.`);
       socket.emit('error', '部屋に参加してからレームをリセットしてください!');
       return;
     }
-    resetBingoCaller(currentRoom);// 特定の部屋だけリセット
+    resetBingoCaller(roomCode);// 特定の部屋だけリセット
     // クライアント側でカードを生成するため, サーバー側ロジックのみリセット
-    io.to(currentRoom).emit('gameReset', { message: 'ゲームがリセットされました! 新しいカードを生成してください!'});
+    io.to(roomCode).emit('gameReset', { message: 'ゲームがリセットされました! 新しいカードを生成してください!'});
   });
 
   socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
     if (currentRoom) {
-      // 部屋からユーザーが全ていなくなったらセッションをクリーンアップするロジックをここに追加しても良い
-      console.log(`User ${socket.id} left room ${currentRoom}`);
+      // プレイヤーが切断された際にセッションから削除するロジック
+      // removePlayerFromSession(currentRoom, socket.id); // bingoCaller に実装されている場合
+      // socket.rooms をループして全ての参加部屋から削除するロジック
+      socket.rooms.forEach(room => {
+        if (room !== socket.id) {// 個別の部屋のソケットIDの部屋は除外
+          // removePlayerFromSession(room, socket.id); // 実装されていれば呼び出す
+          console.log(`User ${socket.id} removed from session ${room} on disconnect.`);
+          io.to(room).emit('playerLeft', socket.id);// 部屋の他のメンバーに通知
+        }
+      });
     }
   });
 });
@@ -174,6 +213,7 @@ server.listen(port, () => {
   console.log(`Socket.IO server running on http://localhost:${port}`);
 });
 
+// プロセス終了時の処理
 process.on('SIGINT', async () => {
   await prisma.$disconnect();
   server.close(() => {

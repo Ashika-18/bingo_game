@@ -24,7 +24,7 @@ const port = process.env.PORT || 3000;
 const server = http_1.default.createServer(app);
 const io = new socket_io_1.Server(server, {
     cors: {
-        origin: "*", // 開発中は全てのoriginからの接続を許可(本番環境では制限すること)
+        origin: process.env.CLIENT_ORIGIN || "*", // 開発中は全てのoriginからの接続を許可(本番環境では制限すること)
         methods: ["GET", "POST"]
     }
 });
@@ -73,29 +73,6 @@ app.get('/users', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         res.status(500).json({ error: 'Failed to fetch users' });
     }
 }));
-// ビンゴ関連APIエンドポイント（HTTP APIとしては残しておくが、
-// 複数人ゲームのロジックはSocket.IOへ移行するため、使用頻度は減る可能性あり）
-// 次のビンゴ数字を抽選するAPIエンドポイント (roomCodeをクエリパラメータで受け取るように変更)
-app.post('/api/bingo/call', (req, res) => {
-    const roomCode = req.body.roomCode || 'default'; // roomCode をリクエストボディから取得,無ければ 'default'
-    const nextNumber = (0, bingoCaller_1.callNextBingoNumber)(roomCode);
-    if (nextNumber === null) {
-        return res.status(200).json({ message: 'All numbers have been called.', number: null });
-    }
-    res.json({ number: nextNumber });
-});
-// 現在抽選済みの全ての数字を取得するAPIエンドポイント (roomCodeをクエリパラメータで受け取るように変更)
-app.get('/api/bingo/called-numbers', (req, res) => {
-    const roomCode = req.query.roomCode || 'default'; // roomCode をクエリパラメータから取得
-    const called = (0, bingoCaller_1.getCalledNumbers)(roomCode);
-    res.json({ getCalledNumbers: called });
-});
-// ビンゴの抽選状態をリセットするAPIエンドポイント (roomCodeをリクエストボディで受け取るように変更)
-app.post('/api/bingo/reset', (req, res) => {
-    const roomCode = req.body.roomCode || 'default'; // roomCode をリクエストボディから取得
-    (0, bingoCaller_1.resetBingoCaller)(roomCode);
-    res.status(200).json({ message: 'Bingo caller reset successfully.' });
-});
 // ビンゴカード生成APIエンドポイント
 app.get('/api/bingo/card', (req, res) => {
     const newCard = (0, bingoCaller_1.generateBingoCard)();
