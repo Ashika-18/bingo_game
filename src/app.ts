@@ -71,7 +71,7 @@ app.get('/users', async (req, res) => {
     });
     res.json(users);
   } catch (error) {
-    console.error('Error fetching ussers:', error);
+    console.error('Error fetching users:', error);
     res.status(500).json({ error: 'Failed to fetch users'});
   }
 });
@@ -106,18 +106,28 @@ io.on('connection', (socket) => {
     const called = getCalledNumbers(roomCode);// 現在の呼ばれた数字を取得
 
     // 参加したクライアントに、生成されたカードと現在の呼ばれた数字を送信
-    callBack(playerCard, called);
-
+    if (typeof callBack === 'function') {
+      callBack(playerCard, called);
+    } else {
+      console.warn(`Client ${socket.id} did not provide a callback for joinRoom event.`);
+    }
     // 部屋の他のメンバーにプレイヤーが参加したことを通知
-    socket.to(roomCode).emit('PlayerJoined', socket.id);
+    socket.to(roomCode).emit('playerJoined', socket.id);
   });
 
-  //「数字を引く」ボタンが押されたときのイベント (Socket.IO経由)
+  //「数字を引く」ボタンが押されたときのイベント (通常はホスト/ゲームマスターのみが実行)
   socket.on('callNumber', (roomCode: string) => {
-    if (!currentRoom) {
+    if (!roomCode) {
       console.warn(`User ${socket.id} tried to call number without joining a room.`);
       socket.emit('error', '部屋に参加してから数字を引いてください!');
       return; 
+    }
+
+    // ユーザーが実際にその部屋にいるかの追加チェック
+    if (!socket.rooms.has(roomCode)) {
+      console.warn(`User ${socket.id} is not in room ${roomCode} but tried to call number.`);
+      socket.emit('error', 'この部屋で数字を引く権限がありません!');
+      return;
     }
 
     // bingoCaller.ts の callNextBingoNumber は内部でカード更新とビンゴ判定も行います
@@ -146,17 +156,44 @@ io.on('connection', (socket) => {
 
   // プレイヤーがカードのセルをマークするイベント
   socket.on('markCell', (roomCode: string, value: number, callBack: (success: boolean, updatedCard?: PlayerBingoCard, isBingo?: boolean) => void) => {
+    if (!roomCode) {
+      console.warn(`User ${socket.id} tried to mark cell without providing a roomCode.`);
+      if (typeof callBack === 'function') {
+        callBack(false);
+      }
+      socket.emit('error', '部屋コードを指定してからセルをマークしてください!');
+      return;
+    }
+
+    if (!socket.rooms.has(roomCode)) {
+      console.warn(`User ${socket.id} is not in room ${roomCode} but tried to mark cell.`);
+      if (typeof callBack === 'function') {
+        callBack(false);
+      }
+      socket.emit('error', 'この部屋でセルをマークする権限がありません!');
+      return;
+    }
+
     const session = initializeSession(roomCode);
     const player = session.players.get(socket.id);
 
     if (!player) {
       console.warn(`Player ${socket.id} not found in session ${roomCode} for marking cell.`);
-      return callBack(false);
+      if (typeof callBack === 'function') {
+        callBack(false);
+      }
+      socket.emit('error', 'プレイヤー情報が見つかりません!部屋に正しく参加してください!');
+      return;
     }
+
     // 既に呼ばれた数字かどうかを確認 (不正なマークを防ぐため)
     if (!session.calledNumbers.includes(value)) {
       console.warn(`Number ${value} has not been called yet in room ${roomCode}.Player ${socket.id} attempted to mark. `);
-      return callBack(false, player.card, player.isBingo);
+      if (typeof callBack === 'function') {
+        callBack(false, player.card, player.isBingo);
+      }
+      socket.emit('error', `数字 ${value} はまだ呼ばれていません!`);
+      return;
     }
 
     // markNumberOnPlayerCard を使ってカードを更新
@@ -170,12 +207,18 @@ io.on('connection', (socket) => {
         io.to(roomCode).emit('playerBingoAnnounce', { playerId: socket.id});// ルーム全体にビンゴを通知
       }
       // マーク成功と更新されたカード、ビンゴ状態をクライアントに返す
+      if (typeof callBack === 'function') {
       callBack(true, player.card, player.isBingo);
+      }
+
       // 他のクライアントにもこのプレイヤーのカードが更新されたことを通知しても良い
       io.to(roomCode).emit('playerCardMarked', { playerId: socket.id, card: player.card});
     } else {
       // マーク失敗(既にマーク済みなど)
+      if (typeof callBack === 'function') {
       callBack(false, player.card, player.isBingo);
+      }
+      socket.emit('error', `数字 ${value} は既にマーク済みか、無効なセルです!`);
     }
   });
 
@@ -186,12 +229,21 @@ io.on('connection', (socket) => {
       socket.emit('error', '部屋に参加してからレームをリセットしてください!');
       return;
     }
+
+    // ユーザーが実際にその部屋にいるかの追加チェック
+    if (!socket.rooms.has(roomCode)) {
+      console.warn(`User ${socket.id} is not in room ${roomCode} but tried to reset game.`);
+      socket.emit('error', 'この部屋でゲームをリセットする権限がありません!');
+      return;
+    }
+
     resetBingoCaller(roomCode);// 特定の部屋だけリセット
     // クライアント側でカードを生成するため, サーバー側ロジックのみリセット
     io.to(roomCode).emit('gameReset', { message: 'ゲームがリセットされました! 新しいカードを生成してください!'});
   });
 
   socket.on('disconnect', () => {
+    console.log(`User disconnected: ${socket.id}`);
     if (currentRoom) {
       // プレイヤーが切断された際にセッションから削除するロジック
       // removePlayerFromSession(currentRoom, socket.id); // bingoCaller に実装されている場合
@@ -209,7 +261,7 @@ io.on('connection', (socket) => {
 
 // Expressのlistenではなく、HTTPサーバーのlistenを使用
 server.listen(port, () => {
-  console.log(`Express app running on http://lovalhost:${port}`);
+  console.log(`Express app running on http://localhost:${port}`);
   console.log(`Socket.IO server running on http://localhost:${port}`);
 });
 
@@ -217,7 +269,7 @@ server.listen(port, () => {
 process.on('SIGINT', async () => {
   await prisma.$disconnect();
   server.close(() => {
-    console.log('HTTP sever closed!');
+    console.log('HTTP server closed!');
     process.exit(0);
   });
 });

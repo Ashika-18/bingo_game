@@ -2,7 +2,8 @@
 
 console.log('script.js が読み込まれました。');
 
-// DOM要素の変数をnullで宣言し、DOMContentLoadedで初期化する
+// グローバルスコープで変数を宣言（DOMContentLoaded内で初期化）
+let socket;
 let bingoCardElement = null;
 let generateCardButton = null;
 let callNumberButton = null;
@@ -11,147 +12,11 @@ let roomCodeInput = null;
 let joinRoomButton = null;
 let roomStatus = null;
 let resetGameButton = null;
-let historyList = null; // history-list (全て小文字) を取得する変数
-
-// Socket.IOサーバーに接続
-const socket = io();
-
-// 現在のビンゴカードの状態を保持する変数
+let historyList = null;
 let currentBingoCard = [];
 let currentRoomCode = ''; // 参加中の部屋番号
 
-// --- Socket.IOイベントリスナー ---
-socket.on('connect', () => {
-    console.log('Connected to Socket.IO server:', socket.id);
-    if (roomStatus) {
-        roomStatus.textContent = '接続済み。部屋に参加してください。';
-    }
-});
-
-socket.on('disconnect', () => {
-    console.log('Disconnected from Socket.IO server.');
-    if (roomStatus) {
-        roomStatus.textContent = '切断されました。';
-    }
-    if (callNumberButton) callNumberButton.disabled = true;
-    if (resetGameButton) resetGameButton.disabled = true;
-    if (generateCardButton) generateCardButton.disabled = true;
-});
-
-// サーバーから抽選数字がブロードキャストされたとき
-socket.on('bingoNumberCalled', (number) => {
-    if (currentNumberDisplay) {
-        currentNumberDisplay.textContent = number.toString();
-        console.log('現在の抽選数字を更新しました!:', number);// 確認用のログを追加
-    } else {
-        console.error('Error: currrentNumberDisplay 要素が見つかりません!');// エラーログを追加
-    }
-    markNumberOnCard(number);
-    // TODO: ここでビンゴ判定ロジックを呼び出す
-});
-
-// サーバーから現在の抽選済み数字リストが送信されたとき (参加時や数字抽選後)
-socket.on('currentCalledNumbers', (calledNumbers) => {
-    console.log('Received current called numbers:', calledNumbers);
-    if (historyList) {
-        historyList.innerHTML = ''; // リストをクリア
-        calledNumbers.forEach(num => {
-            const span = document.createElement('span');
-            span.textContent = num.toString();
-            span.className = 'history-number';
-            historyList.appendChild(span);
-        });
-    } else {
-        console.error("Error: historyList element not found when receiving currentCalledNumbers.");
-    }
-});
-
-// サーバーからゲーム終了が通知されたとき
-socket.on('gameEnded', (message) => {
-    if (currentNumberDisplay) {
-        currentNumberDisplay.textContent = message;
-    }
-    alert(message);
-    if (callNumberButton) callNumberButton.disabled = true;
-});
-
-// サーバーからゲームリセットが通知されたとき
-socket.on('gameReset', (data) => {
-    alert(data.message);
-    const newCard = generateBingoCard(); // クライアント側でカード生成
-    renderBingoCard(newCard); // 生成したカードを表示
-
-    // UIの状態をリセット
-    if (currentNumberDisplay) currentNumberDisplay.textContent = '--';
-    if (callNumberButton) callNumberButton.disabled = false;
-    if (historyList) historyList.innerHTML = ''; // 履歴をクリア
-    console.log('クライアント側でゲームがリセットされました。');
-});
-
-// サーバーからエラーメッセージを受信したとき
-socket.on('error', (message) => {
-    alert(`エラー: ${message}`);
-    console.error(`Socket.IO Error: ${message}`);
-});
-
-
-// --- DOM操作とイベントリスナー ---
-
-/**
- * ビンゴカードをHTMLにレンダリング（表示）する関数
- * @param {Array<Array<number | null>>} card - ビンゴカードのデータ
- */
-function renderBingoCard(card) {
-    if (bingoCardElement) {
-        bingoCardElement.innerHTML = '';
-        currentBingoCard = card;
-
-        const headers = ['B', 'I', 'N', 'G', 'O'];
-        headers.forEach(headerText => {
-            const headerCell = document.createElement('div');
-            headerCell.className = 'header-cell';
-            headerCell.textContent = headerText;
-            bingoCardElement.appendChild(headerCell);
-        });
-
-        for (let row = 0; row < 5; row++) {
-            for (let col = 0; col < 5; col++) {
-                const cellValue = card[row][col];
-                const cell = document.createElement('div');
-                cell.className = 'bingo-cell';
-
-                if (cellValue !== null) {
-                    cell.id = `cell-${cellValue}`;
-                }
-
-                if (cellValue === null) {
-                    cell.textContent = 'FREE';
-                    cell.classList.add('free-space');
-                } else {
-                    cell.textContent = cellValue.toString();
-                }
-                bingoCardElement.appendChild(cell);
-            }
-        }
-    } else {
-        console.error("Error: bingoCardElement not found when rendering card.");
-    }
-}
-
-/**
- * ビンゴカード上の数字をマークする関数
- * @param {number} numberToMark - マークする数字
- */
-function markNumberOnCard(numberToMark) {
-    const cellToMark = document.getElementById(`cell-${numberToMark}`);
-    if (cellToMark) {
-        cellToMark.classList.add('marked');
-    }
-}
-
-
-// ページが完全に読み込まれた時に初期UI設定とイベントリスナーを登録
-// ★ここのDOMContentLoadedは一つだけです。二重ネストは削除してください。
+// DOMが完全に読み込まれた時に初期UI設定とイベントリスナーを登録
 document.addEventListener('DOMContentLoaded', () => {
     // 全てのDOM要素をここで確実に取得する
     bingoCardElement = document.getElementById('bingo-card');
@@ -163,34 +28,118 @@ document.addEventListener('DOMContentLoaded', () => {
     roomStatus = document.getElementById('roomStatus');
     resetGameButton = document.getElementById('resetGameButton');
     historyList = document.getElementById('history-list'); // IDは全て小文字の 'history-list' です
+    // ★ Socket.IOのインスタンスをここで初期化します
+    socket = io();
 
-    // 初期状態ではボタンを無効化 (DOMContentLoaded後に実行)
-    // ここで null チェックを行うことで、エラーを防ぎます
-    if (callNumberButton) callNumberButton.disabled = true;
-    if (resetGameButton) resetGameButton.disabled = true;
-    if (generateCardButton) generateCardButton.disabled = true;
+    // --- Socket.IOイベントリスナー ---
+    socket.on('connect', () => {
+        console.log('Connected to Socket.IO server:', socket.id);
+        if (roomStatus) {
+            roomStatus.textContent = '接続済み。部屋に参加してください。';
+        }
+        // 接続完了後に(部屋に参加)ボタンを有効化する
+        if (joinRoomButton) joinRoomButton.disabled = false;
+    });
 
-    // joinRoomButtonのイベントリスナーはDOMContentLoaded内で設定
-    if (joinRoomButton) {
-        joinRoomButton.addEventListener('click', () => {
-            const roomCode = roomCodeInput ? roomCodeInput.value.trim() : '';
-            if (roomCode) {
+    socket.on('disconnect', () => {
+        console.log('Disconnected from Socket.IO server.');
+        if (roomStatus) {
+            roomStatus.textContent = '切断されました。';
+        }
+        if (callNumberButton) callNumberButton.disabled = true;
+        if (resetGameButton) resetGameButton.disabled = true;
+        if (generateCardButton) generateCardButton.disabled = true;
+    });
+    
+    // サーバーから抽選数字がブロードキャストされたとき
+    socket.on('bingoNumberCalled', (data) => {
+        const {number, calledNumbers} = data;
+        if (currentNumberDisplay) {
+            currentNumberDisplay.textContent = number.toString();
+            console.log('現在の抽選数字を更新しました!:', number);// 確認用のログを追加
+        } else {
+            console.error('Error: currentNumberDisplay 要素が見つかりません!');// エラーログを追加
+        }
+        // ★修正: サーバーから送られた数字リストに基づいてカードを更新し再描画
+        if (currentBingoCard.length > 0) {
+            currentBingoCard.forEach(row => {
+                row.forEach(cell => {
+                    cell.isMarked = false;
+                    
+                    if (cell.value === null) {
+                        cell.isMarked = true;
+                    }
+                    if (calledNumbers.includes(cell.value)) {
+                        cell.isMarked = true;
+                    }
+                });
+            });
+            renderBingoCard(currentBingoCard);
+        }
+
+        // 呼ばれた数字リストを更新
+        renderCalledNumbers(calledNumbers);
+    });
+
+    // サーバーからビンゴ達成が通知されたとき
+    socket.on('playerBingoAnnounce', (data) => {
+        const {playerId} = data;
+        alert(`プレイヤー${playerId} がBINGO達成!`);
+    });
+
+    // サーバーからゲーム終了が通知されたとき
+    socket.on('gameEnded', (message) => {
+        if (currentNumberDisplay) {
+            currentNumberDisplay.textContent = message;
+        }
+        alert(message);
+        if (callNumberButton) callNumberButton.disabled = true;
+    });
+
+    // サーバーからゲームリセットが通知されたとき
+    socket.on('gameReset', (data) => {
+        alert(data.message);
+        const newCard = generateBingoCard();
+        currentBingoCard = newCard;
+        renderBingoCard(currentBingoCard); // 生成したカードを表示
+
+        // UIの状態をリセット
+        if (currentNumberDisplay) currentNumberDisplay.textContent = '--';
+        if (callNumberButton) callNumberButton.disabled = false;
+        renderCalledNumbers([]);
+        console.log('クライアント側でゲームがリセットされました。');
+    });
+
+    // サーバーからエラーメッセージを受信したとき
+    socket.on('error', (message) => {
+        alert(`エラー: ${message}`);
+        console.error(`Socket.IO Error: ${message}`);
+    });
+        // joinRoomButtonのイベントリスナーはDOMContentLoaded内で設定
+        if (joinRoomButton) {
+            joinRoomButton.addEventListener('click', () => {
+                const roomCode = roomCodeInput ? roomCodeInput.value.trim() : '';
+                if (!roomCode) {
+                    alert('部屋番号を入力してください!');
+                    return;
+                } 
                 currentRoomCode = roomCode;
-                socket.emit('joinRoom', roomCode); // サーバーに部屋参加イベントを送信
-                if (roomStatus) roomStatus.textContent = `部屋: ${roomCode} に参加中`;
-                
-                if (generateCardButton) generateCardButton.disabled = false;
-                if (callNumberButton) callNumberButton.disabled = false;
-                if (resetGameButton) resetGameButton.disabled = false;
-                
-                const newCard = generateBingoCard();
-                renderBingoCard(newCard);
-            } else {
-                alert('部屋番号を入力してください。');
-            }
+
+                socket.emit('joinRoom', roomCode, (card, calledNumbers) => {
+                    if (card) {
+                        currentBingoCard = card;
+                        renderBingoCard(currentBingoCard);
+                        renderCalledNumbers(calledNumbers);
+                        if (roomStatus) roomStatus.textContent = `部屋: ${roomCode}に参加中`;
+                        if (generateCardButton) generateCardButton.disabled = false;
+                        if (callNumberButton) callNumberButton.disabled = false;
+                        if (resetGameButton) resetGameButton.disabled = false;
+                } else {
+                    alert('部屋番号を入力してください。');
+                }
+            });
         });
     }
-
     // callNumberButtonのイベントリスナーはDOMContentLoaded内で設定
     if (callNumberButton) {
         callNumberButton.addEventListener('click', () => {
@@ -198,21 +147,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 alert('先に部屋に参加してください。');
                 return;
             }
-            socket.emit('callNumber'); // サーバーに数字抽選イベントを送信
+            socket.emit('callNumber', currentRoomCode); // サーバーに数字抽選イベントを送信
         });
     }
 
     // generateCardButtonのイベントリスナーはDOMContentLoaded内で設定
     if (generateCardButton) {
         generateCardButton.addEventListener('click', () => {
-            if (!currentRoomCode) {
-                alert('先に部屋に参加してください。');
-                return;
-            }
             const newCard = generateBingoCard();
+            currentBingoCard = newCard;
             renderBingoCard(newCard);
-
             if (currentNumberDisplay) currentNumberDisplay.textContent = '--';
+            renderCalledNumbers([]);
         });
     }
 
@@ -224,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             if (confirm('本当にゲームをリセットしますか？この部屋の全員に影響します。')) {
-                socket.emit('resetGame'); // サーバーにゲームリセットイベントを送信
+                socket.emit('resetGame', currentRoomCode); // サーバーにゲームリセットイベントを送信
             }
         });
     }
@@ -236,7 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('ページロード完了。部屋に参加待機中。');
 });
 
-
+// --- DOM操作とイベントリスナー ---
 // generateBingoCard 関数を public/script.js の中に直接定義します。
 function generateBingoCard() {
     const card = Array(5).fill(null).map(() => Array(5).fill(null));
@@ -261,12 +207,74 @@ function generateBingoCard() {
         numbersInColumn.sort((a, b) => a - b);
 
         for (let rowIndex = 0; rowIndex < 5; rowIndex++) {
-            if (letter === 'N' && rowIndex === 2) {
-                card[rowIndex][colIndex] = null; // FREEスペース
-            } else {
-                card[rowIndex][colIndex] = numbersInColumn.shift();
-            }
+            card[rowIndex][colIndex] = (letter === 'N' && rowIndex === 2) ? {value: null, isMarked: false} : {value: numbersInColumn.shift(), isMarked: false};
         }
     });
     return card;
+}
+/**
+ * ビンゴカードをHTMLにレンダリング（表示）する関数
+ * @param {Array<Array<number | null>>} card - ビンゴカードのデータ
+ */
+function renderBingoCard(card) {
+    if (!bingoCardElement) {
+        console.error("Error: bingoCardElement not found when rendering card.");
+        return;
+    } 
+    bingoCardElement.innerHTML = '';
+    const headers = ['B', 'I', 'N', 'G', 'O'];
+    headers.forEach(headerText => {
+        const headerCell = document.createElement('div');
+        headerCell.className = 'header-cell';
+        headerCell.textContent = headerText;
+        bingoCardElement.appendChild(headerCell);
+    });
+    card.forEach(row => {
+        row.forEach(cellObj => {
+            const cell = document.createElement('div');
+            cell.className = 'bingo-cell';
+
+            const cellValue = cellObj.value;
+            if (cellValue === null) {
+                cell.textContent = 'FREE';
+                cell.classList.add('free-space');
+            } else {
+                cell.textContent = cellValue.toString();
+                cell.id = `cell-${cellValue}`;
+                cell.addEventListener('click', () => {
+                    if (socket && currentRoomCode) {
+                        socket.emit('markCell', currentRoomCode, cellValue, (success, updatedCard, isBingo) => {
+                            if (success && updatedCard) {
+                                currentBingoCard = updatedCard;
+                                renderBingoCard(currentBingoCard);
+                                if (isBingo){
+                                    alert('-BINGO!-');
+                                }
+                            } else {
+                                console.warn('マーキングに失敗しました!');
+                            }
+                        });
+                    }
+                });
+            }
+            if (cellObj.isMarked) {
+                cell.classList.add('marked');
+            }
+            bingoCardElement.appendChild(cell);
+        });
+    });
+}
+// サーバーから呼ばれた数字リストをHTMLに描画
+function renderCalledNumbers(numbers) {
+    if (historyList) {
+        historyList.innerHTML = '';
+        numbers.forEach(num => {
+            const span = document.createElement('span');
+            span.textContent = num.toString();
+            span.className = 'history-number';
+            historyList.appendChild(span);
+        });
+    } else {
+        console.error("Error: historyList element not found.");
+    }
 }
