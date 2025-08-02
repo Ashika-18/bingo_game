@@ -13,10 +13,11 @@ export type PlayerBingoCard = BingoCell[][];
 /**
  * 各プレイヤーの情報を表す型。
  */
-type Player = {
+export type Player = {
     id: string;
     card: PlayerBingoCard;
     isBingo: boolean;
+    name: string;
 }
 
 // セッションごとの抽選状態を保持するマップ
@@ -111,9 +112,22 @@ export function getCalledNumbers(roomCode: string): number[] {
  * @param roomCode ゲームセッションの一意のID
  */
 export function resetBingoCaller(roomCode: string): void {
-    if (sessions.has(roomCode)) {
-        initializeSession(roomCode);// セッションを再初期化
-        sessions.get(roomCode)!.players.clear();
+    const session = sessions.get(roomCode);
+    if (session) {
+        // セッションの状態を初期化
+        const initialNumbers = Array.from({ length: 75}, (_, i) => i + 1);
+        session.numbers = initialNumbers;
+        session.calledNumbers = [];// 呼ばれた数字をクリア
+        session.availableNumbers = [...initialNumbers];// 利用可能な数字をリセット
+
+        // 前プレイヤーのカードをリセット
+        session.players.forEach(player => {
+            // 新しいカードを生成
+            const newCard = generateBingoCard();
+            player.card = newCard;
+            player.isBingo = false;// ビンゴ状態をリセット
+        });
+
         console.log(`Bingo caller reset for room ${roomCode}.`);
     } else {
         console.warn(`Attempted to reset non-existent session: ${roomCode}`);
@@ -164,12 +178,12 @@ export function generateBingoCard(): PlayerBingoCard {
  * @param playerId 追加するプレイヤーの一意のID (例: Socket.IOのソケットID)
  * @returns 生成または取得されたプレイヤーのビンゴカード
  */
-export function addPlayerToSession(roomCode: string, playerId: string): PlayerBingoCard {
+export function addPlayerToSession(roomCode: string, playerId: string, playerName: string): PlayerBingoCard {
     const session = initializeSession(roomCode);// セッションが存在しなければ初期化
 
     if(!session.players.has(playerId)) {
         const newCard = generateBingoCard();// 新しいビンゴカードを生成
-        session.players.set(playerId, { id: playerId, card: newCard, isBingo: false});
+        session.players.set(playerId, { id: playerId, card: newCard, isBingo: false, name: playerName});
         console.log(`Player ${playerId} added to room ${roomCode}`);
         return newCard;
     }

@@ -83,8 +83,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // サーバーからビンゴ達成が通知されたとき
     socket.on('playerBingoAnnounce', (data) => {
-        const {playerId} = data;
-        alert(`プレイヤー${playerId} がBINGO達成!`);
+        const {playerName} = data;
+        alert(`プレイヤー${playerName} がBINGO達成!`);
     });
 
     // サーバーからゲーム終了が通知されたとき
@@ -119,13 +119,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (joinRoomButton) {
             joinRoomButton.addEventListener('click', () => {
                 const roomCode = roomCodeInput ? roomCodeInput.value.trim() : '';
-                if (!roomCode) {
-                    alert('部屋番号を入力してください!');
+                // ここでplayerNameを定義
+                const playerName = document.getElementById('playerNameInput').value.trim();
+
+                if (!roomCode || !playerName) {
+                    alert('部屋番号とあなたの名前を入力してください!');
                     return;
                 } 
                 currentRoomCode = roomCode;
 
-                socket.emit('joinRoom', roomCode, (card, calledNumbers) => {
+                socket.emit('joinRoom', roomCode, playerName, (card, calledNumbers) => {
                     if (card) {
                         currentBingoCard = card;
                         renderBingoCard(currentBingoCard);
@@ -134,9 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (generateCardButton) generateCardButton.disabled = false;
                         if (callNumberButton) callNumberButton.disabled = false;
                         if (resetGameButton) resetGameButton.disabled = false;
-                } else {
-                    alert('部屋番号を入力してください。');
-                }
+                } 
             });
         });
     }
@@ -156,9 +157,13 @@ document.addEventListener('DOMContentLoaded', () => {
         generateCardButton.addEventListener('click', () => {
             const newCard = generateBingoCard();
             currentBingoCard = newCard;
+            renderBingoCard(currentBingoCard);
+            
+            // 抽選数字表示をリセット
             renderBingoCard(newCard);
-            if (currentNumberDisplay) currentNumberDisplay.textContent = '--';
-            renderCalledNumbers([]);
+            if (currentNumberDisplay) {
+                currentNumberDisplay.textContent = '--';
+            }
         });
     }
 
