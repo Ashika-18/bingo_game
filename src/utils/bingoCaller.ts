@@ -63,7 +63,7 @@ export function initializeSession(roomCode: string): BingoSession {
  * @param roomCode ゲームセッションの一意のID
  * @returns 抽選された数字、またはnull（全ての数字が呼ばれた場合）
  */
-export function callNextBingoNumber(roomCode: string): number | null {
+export function callNextBingoNumber(roomCode: string): { number: number, hasBingoWinner: boolean } | null {
     const session = sessions.get(roomCode);
     if (!session) {
         console.error(`Session ${roomCode} not found.`);
@@ -72,10 +72,12 @@ export function callNextBingoNumber(roomCode: string): number | null {
     if (session.availableNumbers.length === 0) {
         return null;// 全ての数字が呼ばれたら
     }
+    let hasBingoWinner = false;// ビンゴ達成者がいるかどうかのフラグを追加
+
     const randomIndex = Math.floor(Math.random() * session.availableNumbers.length);
     const nextNumber = session.availableNumbers.splice(randomIndex, 1)[0];
-
     session.calledNumbers.push(nextNumber);
+
     console.log(`Called number ${nextNumber} for room ${roomCode}.Called numbers: ${session.calledNumbers.join(',')}`);
 
     // --- 各プレイヤーのカードを更新し、ビンゴ判定を行う ---
@@ -87,15 +89,12 @@ export function callNextBingoNumber(roomCode: string): number | null {
         if (wasMarked && !player.isBingo) {
             if (checkBingo(player.card)) {
                 player.isBingo = true;// ビンゴ状態をtrueに更新
+                hasBingoWinner = true;
                 console.log(`Player ${player.id} achieved BINGO in room ${roomCode}!`);
-                // TODO: ここでSocket.IOなどを使ってクライアントに「ビンゴ！」を通知する処理を呼び出す
-                // 例: io.to(player.id).emit('bingoDetected', { playerId: player.id, roomCode: roomCode, calledNumber: nextNumber });
-                // 例: io.to(roomCode).emit('playerBingo', { playerId: player.id, calledNumber: nextNumber }); // ルーム内の全員に通知
             }
         }
     });
-
-    return nextNumber;
+    return { number: nextNumber, hasBingoWinner: hasBingoWinner };
 }   
 
 /**

@@ -28,6 +28,7 @@ function initializeSession(roomCode) {
             players: new Map(),
             isGameStarted: false,
             isGameEnded: false,
+            bingoWinnerId: null,
         });
         console.log(`Session initialized for room: ${roomCode}`);
     }
@@ -47,6 +48,7 @@ function callNextBingoNumber(roomCode) {
     if (session.availableNumbers.length === 0) {
         return null; // 全ての数字が呼ばれたら
     }
+    let hasBingoWinner = false; // ビンゴ達成者がいるかどうかのフラグを追加
     const randomIndex = Math.floor(Math.random() * session.availableNumbers.length);
     const nextNumber = session.availableNumbers.splice(randomIndex, 1)[0];
     session.calledNumbers.push(nextNumber);
@@ -59,14 +61,12 @@ function callNextBingoNumber(roomCode) {
         if (wasMarked && !player.isBingo) {
             if (checkBingo(player.card)) {
                 player.isBingo = true; // ビンゴ状態をtrueに更新
+                hasBingoWinner = true;
                 console.log(`Player ${player.id} achieved BINGO in room ${roomCode}!`);
-                // TODO: ここでSocket.IOなどを使ってクライアントに「ビンゴ！」を通知する処理を呼び出す
-                // 例: io.to(player.id).emit('bingoDetected', { playerId: player.id, roomCode: roomCode, calledNumber: nextNumber });
-                // 例: io.to(roomCode).emit('playerBingo', { playerId: player.id, calledNumber: nextNumber }); // ルーム内の全員に通知
             }
         }
     });
-    return nextNumber;
+    return { number: nextNumber, hasBingoWinner: hasBingoWinner };
 }
 /**
  * 指定されたセッションの、現在抽選済みの全ての数字を取得します。
@@ -95,6 +95,7 @@ function resetBingoCaller(roomCode) {
         session.availableNumbers = [...initialNumbers]; // 利用可能な数字をリセット
         session.isGameStarted = false;
         session.isGameEnded = false;
+        session.bingoWinnerId = null;
         // 前プレイヤーのカードをリセット
         session.players.forEach(player => {
             // 新しいカードを生成

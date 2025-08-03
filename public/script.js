@@ -92,12 +92,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // サーバーからゲーム終了が通知されたとき
-    socket.on('gameEnded', (message) => {
-        if (currentNumberDisplay) {
-            currentNumberDisplay.textContent = message;
+    socket.on('gameEnded', (data) => {
+        const { winner, message } = data;
+
+        if (winner) {
+            if (currentNumberDisplay) {
+                currentNumberDisplay.textContent = `${winner}さんのビンゴでゲーム終了!`;
+            }
+            alert(`${winner}さんのビンゴでゲーム終了！`);
+        } else {
+            if (currentNumberDisplay) {
+                currentNumberDisplay.textContent = message;
+            }
+            alert(message);
         }
-        alert(message);
+        // どちらの場合でもボタンは無効か
         if (callNumberButton) callNumberButton.disabled = true;
+        if (generateCardButton) generateCardButton.disabled = true;
     });
 
     // サーバーからゲームリセットが通知されたとき

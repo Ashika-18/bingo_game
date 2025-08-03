@@ -175,30 +175,30 @@ io.on('connection', (socket) => {
       }
 
       // bingoCaller.ts の callNextBingoNumber は内部でカード更新とビンゴ判定も行います
-      const nextNumber = callNextBingoNumber(roomCode);
+      const result = callNextBingoNumber(roomCode);
 
-      if (nextNumber !== null) {
-        console.log(`New number called: ${nextNumber} in room ${roomCode}`);
+      if (result !== null) {
+        console.log(`New number called: ${result.number} in room ${roomCode}`);
         // その部屋の全員に、次の抽選された数字と現在の抽選済み数字リストを更新して送信
         const called = getCalledNumbers(roomCode);
-        io.to(roomCode).emit('bingoNumberCalled', { number: nextNumber, calledNumbers: called});
+        io.to(roomCode).emit('bingoNumberCalled', { number: result.number, calledNumbers: called });
 
         // プレイヤーのビンゴ状態をチェックし、必要に応じて通知
-        const session = initializeSession(roomCode);// 最新のセッション状態を取得
-        session.players.forEach(player => {
-          if (player.isBingo && session.bingoWinnerId === null) {
-            // 最初にビンゴを達成したプレイヤーを記録
-            session.bingoWinnerId = player.id;
-            session.isGameEnded = true;// ゲーム終了フラグを立てる
+        if (result.hasBingoWinner) {
+          const winner = [...session.players.values()].find(p => p.isBingo);
 
-            // ビンゴしたプレイヤーがいれば、ルーム全体に通知
-            io.to(roomCode).emit('playerBingoAnnounce', { playerName: player.name });
+          if (winner && session.bingoWinnerId === null) {
+            //最初にビンゴを達成したプレイヤーを記録
+            session.bingoWinnerId = winner.id;
+            session.isGameEnded = true;
 
-            // ゲーム終了を通知するイベントを送信
-            io.to(roomCode).emit('gameEnded', { winner: player.name });
+            // ビンゴ通知とゲーム終了通知を送信
+            io.to(roomCode).emit('playerBingoAnnounce', { playerName: winner.name });
+            io.to(roomCode).emit('gameEnded', { winner: winner.name });
+
+            console.log(`Game ended by BINGO from player ${winner.name} in room ${roomCode}`);
           }
-        });
-
+        }
       } else {
         // 全ての数字が呼ばれたら、ゲーム終了を通知
         io.to(roomCode).emit('gameEnded', '全ての数字が抽選されました!');
