@@ -85,6 +85,10 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('playerBingoAnnounce', (data) => {
         const {playerName} = data;
         alert(`プレイヤー${playerName} がBINGO達成!`);
+        // ビンゴ達成時に抽選ボタンを無効化
+        if (callNumberButton) {
+            callNumberButton.disabled = true;
+        }
     });
 
     // サーバーからゲーム終了が通知されたとき

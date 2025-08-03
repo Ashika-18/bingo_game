@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.sessions = void 0;
 exports.initializeSession = initializeSession;
 exports.callNextBingoNumber = callNextBingoNumber;
 exports.getCalledNumbers = getCalledNumbers;
@@ -11,24 +12,26 @@ exports.checkBingo = checkBingo;
 exports.markNumberOnPlayerCard = markNumberOnPlayerCard;
 // --- セッションごとの抽選状態を保持するマップ ---
 // キーはセッションID (roomCode)、値はそのセッションのBingoSessionオブジェクト
-const sessions = new Map();
+exports.sessions = new Map();
 /**
  * 指定されたセッションIDのビンゴゲームの状態を初期化または取得します。
  * @param roomCode ゲームセッションの一意のID
  * @returns 初期化された、または既存のビンゴセッション
  */
 function initializeSession(roomCode) {
-    if (!sessions.has(roomCode)) {
+    if (!exports.sessions.has(roomCode)) {
         const initialNumbers = Array.from({ length: 75 }, (_, i) => i + 1);
-        sessions.set(roomCode, {
+        exports.sessions.set(roomCode, {
             numbers: initialNumbers,
             calledNumbers: [],
             availableNumbers: [...initialNumbers], // 利用可能な数字は初期化時に全て
-            players: new Map()
+            players: new Map(),
+            isGameStarted: false,
+            isGameEnded: false,
         });
         console.log(`Session initialized for room: ${roomCode}`);
     }
-    return sessions.get(roomCode); // ! は null でないことをアサート
+    return exports.sessions.get(roomCode); // ! は null でないことをアサート
 }
 /**
  * 指定されたセッションから次のビンゴ数字を抽選します。
@@ -36,7 +39,7 @@ function initializeSession(roomCode) {
  * @returns 抽選された数字、またはnull（全ての数字が呼ばれた場合）
  */
 function callNextBingoNumber(roomCode) {
-    const session = sessions.get(roomCode);
+    const session = exports.sessions.get(roomCode);
     if (!session) {
         console.error(`Session ${roomCode} not found.`);
         return null;
@@ -71,7 +74,7 @@ function callNextBingoNumber(roomCode) {
  * @returns 抽選済みの数字の配列
  */
 function getCalledNumbers(roomCode) {
-    const session = sessions.get(roomCode);
+    const session = exports.sessions.get(roomCode);
     if (!session) {
         console.error(`Session ${roomCode} not found.`);
         return [];
@@ -83,13 +86,15 @@ function getCalledNumbers(roomCode) {
  * @param roomCode ゲームセッションの一意のID
  */
 function resetBingoCaller(roomCode) {
-    const session = sessions.get(roomCode);
+    const session = exports.sessions.get(roomCode);
     if (session) {
         // セッションの状態を初期化
         const initialNumbers = Array.from({ length: 75 }, (_, i) => i + 1);
         session.numbers = initialNumbers;
         session.calledNumbers = []; // 呼ばれた数字をクリア
         session.availableNumbers = [...initialNumbers]; // 利用可能な数字をリセット
+        session.isGameStarted = false;
+        session.isGameEnded = false;
         // 前プレイヤーのカードをリセット
         session.players.forEach(player => {
             // 新しいカードを生成
@@ -162,13 +167,13 @@ function addPlayerToSession(roomCode, playerId, playerName) {
  * @param playerId 削除するプレイヤーの一意のID
  */
 function removePlayerFromSession(roomCode, playerId) {
-    const session = sessions.get(roomCode);
+    const session = exports.sessions.get(roomCode);
     if (session) {
         session.players.delete(playerId);
         console.log(`Player ${playerId} removed from room ${roomCode}`);
         // もしプレイヤーがいなくなったらセッションを削除する
         if (session.players.size === 0) {
-            sessions.delete(roomCode);
+            exports.sessions.delete(roomCode);
             console.log(`Session ${roomCode} delete as all players left.`);
         }
     }

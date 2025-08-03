@@ -17,7 +17,8 @@ import {
   PlayerBingoCard,
   BingoCell,
   removePlayerFromSession,
-  Player
+  Player,
+  sessions,
 } from './utils/bingoCaller';
 
 interface Room {
@@ -90,6 +91,19 @@ app.get('/api/bingo/card', (req, res) => {
   res.json(newCard);
 });
 
+// プレイヤーリストを部屋にブロードキャストする共通関数
+function broadcastPlayerList(roomCode: string) {
+  const session = sessions.get(roomCode);
+  if (session) {
+    // プレイヤーのIDと名前のリストを作成
+    const playerList = [...session.players.values()].map(p => ({
+      id: p.id,
+      name: p.name,
+    }));
+    io.to(roomCode).emit('playerListUpdate', playerList);
+  }
+}
+
 // Socket.IOの接続イベントリスナー
 io.on('connection', (socket) => {
   console.log(`A user connected: ${socket.id}`);
@@ -143,6 +157,7 @@ io.on('connection', (socket) => {
 
     //「数字を引く」ボタンが押されたときのイベント (通常はホスト/ゲームマスターのみが実行)
     socket.on('callNumber', (roomCode: string) => {
+      const session = initializeSession(roomCode);
       if (!roomCode) {
         console.warn(`User ${socket.id} tried to call number without joining a room.`);
         socket.emit('error', '部屋に参加してから数字を引いてください!');
@@ -153,6 +168,11 @@ io.on('connection', (socket) => {
       if (!socket.rooms.has(roomCode)) {
         console.warn(`User ${socket.id} is not in room ${roomCode} but tried to call number.`);
         socket.emit('error', 'この部屋で数字を引く権限がありません!');
+        return;
+      }
+
+      if (session.isGameEnded) {
+        console.log(`Game in room ${roomCode} has already ended.`);
         return;
       }
 
@@ -201,6 +221,14 @@ io.on('connection', (socket) => {
       }
 
       const session = initializeSession(roomCode);
+      // ゲームが終了している場合は処理を中断
+      if (session.isGameEnded) {
+        if (typeof callBack === 'function') {
+          callBack(false);
+        }
+        return;
+      }
+
       const player: Player | undefined = session.players.get(socket.id);
       // デバッグ用ログ追加
       console.log('--- markCell イベント ---');
@@ -233,6 +261,8 @@ io.on('connection', (socket) => {
         // マークが成功した場合、ビンゴ判定
         if (!player.isBingo && checkBingo(player.card)) {
           player.isBingo = true;// プレイヤーのビンゴ状態を更新
+          // ビンゴ達成時にゲーム終了フラグを立てる
+          session.isGameEnded = true;
           console.log(`Player ${socket.id} achived BINGO in room ${roomCode}!`);
           io.to(roomCode).emit('playerBingoAnnounce', { playerName: player.name });// ルーム全体にビンゴを通知
         }

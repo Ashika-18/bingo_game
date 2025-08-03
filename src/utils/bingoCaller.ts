@@ -27,12 +27,13 @@ type BingoSession = {
     calledNumbers: number[];// 既に呼ばれた数字の配列
     availableNumbers: number[];// まだ呼ばれていない数字の配列
     players: Map<string, Player>;
-    // 後で参加プレイヤーの情報などを追加することもできます
+    isGameStarted: boolean;
+    isGameEnded: boolean;
 };
 
 // --- セッションごとの抽選状態を保持するマップ ---
 // キーはセッションID (roomCode)、値はそのセッションのBingoSessionオブジェクト
-const sessions = new Map<string, BingoSession>();
+export const sessions = new Map<string, BingoSession>();
 
 /**
  * 指定されたセッションIDのビンゴゲームの状態を初期化または取得します。
@@ -46,7 +47,9 @@ export function initializeSession(roomCode: string): BingoSession {
             numbers: initialNumbers,
             calledNumbers: [],
             availableNumbers: [...initialNumbers],// 利用可能な数字は初期化時に全て
-            players: new Map<string, Player>()
+            players: new Map<string, Player>(),
+            isGameStarted: false,
+            isGameEnded: false,
         });
         console.log(`Session initialized for room: ${roomCode}`);
     }
@@ -119,6 +122,8 @@ export function resetBingoCaller(roomCode: string): void {
         session.numbers = initialNumbers;
         session.calledNumbers = [];// 呼ばれた数字をクリア
         session.availableNumbers = [...initialNumbers];// 利用可能な数字をリセット
+        session.isGameStarted = false;
+        session.isGameEnded = false;
 
         // 前プレイヤーのカードをリセット
         session.players.forEach(player => {
