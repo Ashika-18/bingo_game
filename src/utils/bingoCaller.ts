@@ -29,6 +29,7 @@ type BingoSession = {
     players: Map<string, Player>;
     isGameStarted: boolean;
     isGameEnded: boolean;
+    bingoWinnerId: string | null;
 };
 
 // --- セッションごとの抽選状態を保持するマップ ---
@@ -50,6 +51,7 @@ export function initializeSession(roomCode: string): BingoSession {
             players: new Map<string, Player>(),
             isGameStarted: false,
             isGameEnded: false,
+            bingoWinnerId: null,
         });
         console.log(`Session initialized for room: ${roomCode}`);
     }
@@ -124,6 +126,7 @@ export function resetBingoCaller(roomCode: string): void {
         session.availableNumbers = [...initialNumbers];// 利用可能な数字をリセット
         session.isGameStarted = false;
         session.isGameEnded = false;
+        session.bingoWinnerId = null;
 
         // 前プレイヤーのカードをリセット
         session.players.forEach(player => {

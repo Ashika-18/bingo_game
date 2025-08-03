@@ -157,22 +157,20 @@ io.on('connection', (socket) => {
 
     //「数字を引く」ボタンが押されたときのイベント (通常はホスト/ゲームマスターのみが実行)
     socket.on('callNumber', (roomCode: string) => {
-      const session = initializeSession(roomCode);
-      if (!roomCode) {
-        console.warn(`User ${socket.id} tried to call number without joining a room.`);
+      const session = sessions.get(roomCode);
+
+      // セッションが存在しないか,不正なアクセスをチェック
+      if (!session || !socket.rooms.has(roomCode)) {
+        console.warn(`User ${socket.id} tried to call number in invalid room ${roomCode}.`);
         socket.emit('error', '部屋に参加してから数字を引いてください!');
         return; 
       }
 
-      // ユーザーが実際にその部屋にいるかの追加チェック
-      if (!socket.rooms.has(roomCode)) {
-        console.warn(`User ${socket.id} is not in room ${roomCode} but tried to call number.`);
-        socket.emit('error', 'この部屋で数字を引く権限がありません!');
-        return;
-      }
-
       if (session.isGameEnded) {
         console.log(`Game in room ${roomCode} has already ended.`);
+        // クライアント側にゲーム終了を再度通知
+        const winnerName = session.bingoWinnerId ? session.players.get(session.bingoWinnerId)?.name : null;
+        io.to(roomCode).emit('gameEnded', { winner: winnerName, message: 'ゲームはすでに終了しています!' });
         return;
       }
 
@@ -188,9 +186,16 @@ io.on('connection', (socket) => {
         // プレイヤーのビンゴ状態をチェックし、必要に応じて通知
         const session = initializeSession(roomCode);// 最新のセッション状態を取得
         session.players.forEach(player => {
-          if (player.isBingo) {
+          if (player.isBingo && session.bingoWinnerId === null) {
+            // 最初にビンゴを達成したプレイヤーを記録
+            session.bingoWinnerId = player.id;
+            session.isGameEnded = true;// ゲーム終了フラグを立てる
+
             // ビンゴしたプレイヤーがいれば、ルーム全体に通知
             io.to(roomCode).emit('playerBingoAnnounce', { playerName: player.name });
+
+            // ゲーム終了を通知するイベントを送信
+            io.to(roomCode).emit('gameEnded', { winner: player.name });
           }
         });
 
