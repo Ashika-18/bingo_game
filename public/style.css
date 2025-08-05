@@ -122,3 +122,10 @@ button:disabled {
     font-size: 0.9em;
     color: #0056b3;
 }
+
+footer {
+    text-align: center; /* テキストを中央揃えにする */
+   margin-top: 20px; /* 上に少し余白を追加 (任意) */
+   padding: 10px 0;   /* 上下のパディングを追加 (任意) */
+   font-size: 0.8em;
+}
