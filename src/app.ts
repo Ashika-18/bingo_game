@@ -19,10 +19,12 @@ import {
   removePlayerFromSession,
   Player,
   sessions,
+  BingoSession,
 } from './utils/bingoCaller';
 
 interface Room {
   calledNumbers: number[];
+  gameMaster: string | null;
 }
 
 const app = express();
@@ -92,7 +94,7 @@ app.get('/api/bingo/card', (req, res) => {
 });
 
 // プレイヤーリストを部屋にブロードキャストする共通関数
-function broadcastPlayerList(roomCode: string) {
+function broadcastPlayerList(roomCode: string, io: SocketIOServer): void {
   const session = sessions.get(roomCode);
   if (session) {
     // プレイヤーのIDと名前のリストを作成
@@ -100,7 +102,7 @@ function broadcastPlayerList(roomCode: string) {
       id: p.id,
       name: p.name,
     }));
-    io.to(roomCode).emit('playerListUpdate', playerList);
+    io.to(roomCode).emit('playerListUpdate', playerList, session.gameMaster);
   }
 }
 
@@ -114,6 +116,11 @@ io.on('connection', (socket) => {
     socket.on('joinRoom', (roomCode: string, playerName: string, callBack: (card: PlayerBingoCard | null, calledNumbers: number[]) => void) => {
       // まずセッションを初期化または取得
       const session = initializeSession(roomCode);
+      // 部屋にゲームマスターがいない場合、現在のプレイヤーをゲームマスターに設定
+      if (!session.gameMaster) {
+        session.gameMaster = socket.id;
+      }
+
       // 名前の重複チェック
       const existingPlayer = [...session.players.values()].find(p => p.name === playerName);
 
@@ -144,6 +151,7 @@ io.on('connection', (socket) => {
 
       const playerCard = addPlayerToSession(roomCode, socket.id, playerName);// プレイヤーをセッションに追加しカードを取得
       const called = getCalledNumbers(roomCode);// 現在の呼ばれた数字を取得
+      callBack(playerCard, called);
 
       // 参加したクライアントに、生成されたカードと現在の呼ばれた数字を送信
       if (typeof callBack === 'function') {
@@ -151,8 +159,8 @@ io.on('connection', (socket) => {
       } else {
         console.warn(`Client ${socket.id} did not provide a callback for joinRoom event.`);
       }
-      // 部屋の他のメンバーにプレイヤーが参加したことを通知
-      socket.to(roomCode).emit('playerJoined', socket.id);
+      // 参加したプレイヤーだけでなく、部屋にいる全員に最新の情報をブロードキャストする
+      broadcastPlayerList(roomCode, io);
     });
 
     //「数字を引く」ボタンが押されたときのイベント (通常はホスト/ゲームマスターのみが実行)
@@ -164,6 +172,23 @@ io.on('connection', (socket) => {
         console.warn(`User ${socket.id} tried to call number in invalid room ${roomCode}.`);
         socket.emit('error', '部屋に参加してから数字を引いてください!');
         return; 
+      }
+
+      // リクエストがゲームマスターから送られたか確認
+      if (session.gameMaster !== socket.id) {
+        socket.emit('error', '数字を引けるのはgemaMasterだけです!');
+        return;
+      }
+
+      if (!session.gameMaster) {
+        session.gameMaster = socket.id;
+      }
+
+      // プレイヤー数をチェックし、二人未満なら抽選を中断
+      if (session.players.size < 2) {
+        console.log(`Room ${roomCode} needs at least 2 players to start.`);
+        socket.emit('error', 'ゲームを開始するには2人以上必要です.');
+        return;
       }
 
       if (session.isGameEnded) {
@@ -326,7 +351,7 @@ io.on('connection', (socket) => {
             io.to(room).emit('playerLeft', socket.id);// 部屋の他のメンバーに通知
           }
         });
-      });
+    });
 });
 
 // Expressのlistenではなく、HTTPサーバーのlistenを使用

@@ -28,6 +28,9 @@ document.addEventListener('DOMContentLoaded', () => {
     roomStatus = document.getElementById('roomStatus');
     resetGameButton = document.getElementById('resetGameButton');
     historyList = document.getElementById('history-list'); // IDは全て小文字の 'history-list' です
+
+    const playerListElement = document.getElementById('player-list');
+
     // ★ Socket.IOのインスタンスをここで初期化します
     socket = io();
 
@@ -40,6 +43,42 @@ document.addEventListener('DOMContentLoaded', () => {
         // 接続完了後に(部屋に参加)ボタンを有効化する
         if (joinRoomButton) joinRoomButton.disabled = false;
     });
+
+    // サーバーからプレイヤーのリストの更新を受け取った時の処理を追加
+    socket.on('playerListUpdate', (players, gameMasterId) => {
+        if (playerListElement) {
+            playerListElement.innerHTML = players.map(p => {
+                const isMaster = p.id === gameMasterId;
+                return `<li>${p.name} ${isMaster ? '👑' : ''}</li>`;
+            }).join('');
+        }
+        if (callNumberButton) {
+            const isMeMaster = socket.id === gameMasterId;
+            const isGameReady = players.length >= 2;
+            
+            // ゲームマスターであり、かつプレイヤーが2人以上の場合にのみボタンを有効化
+            if (isMeMaster) {
+                callNumberButton.style.display = 'block';
+
+                callNumberButton.disabled = !isGameReady;
+            } else {
+                callNumberButton.style.display = 'none';
+            }
+        }
+    });
+
+    // サーバーからルーム参加完了の応答を受け取ったとき
+    socket.on('roomJoined', (data) => {
+        const { roomCode, playerName } = data;
+        currentRoomCode = roomCode;
+        console.log(`ルーム ${roomCode} にプレイヤー ${playerName} として参加しました!`);
+        roomStatus.textContent = `ルームID: ${roomCode} (プレイヤー: ${playerName})`;
+        
+        // 参加が完了したら参加ボタンを無効化
+        if (joinRoomButton) {
+            joinRoomButton.disabled = true;
+        }
+    })
 
     socket.on('disconnect', () => {
         console.log('Disconnected from Socket.IO server.');
@@ -60,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             console.error('Error: currentNumberDisplay 要素が見つかりません!');// エラーログを追加
         }
-        // ★修正: サーバーから送られた数字リストに基づいてカードを更新し再描画
+        // サーバーから送られた数字リストに基づいてカードを更新し再描画
         if (currentBingoCard.length > 0) {
             currentBingoCard.forEach(row => {
                 row.forEach(cell => {
@@ -109,18 +148,26 @@ document.addEventListener('DOMContentLoaded', () => {
         // どちらの場合でもボタンは無効か
         if (callNumberButton) callNumberButton.disabled = true;
         if (generateCardButton) generateCardButton.disabled = true;
+        if (resetGameButton) resetGameButton.disabled = false;
     });
 
     // サーバーからゲームリセットが通知されたとき
     socket.on('gameReset', (data) => {
-        alert(data.message);
+        alert('ゲームがリセットされました!');
         const newCard = generateBingoCard();
         currentBingoCard = newCard;
         renderBingoCard(currentBingoCard); // 生成したカードを表示
 
         // UIの状態をリセット
         if (currentNumberDisplay) currentNumberDisplay.textContent = '--';
-        if (callNumberButton) callNumberButton.disabled = false;
+        if (callNumberButton) callNumberButton.disabled = true;
+        if (generateCardButton) generateCardButton.disabled = false;
+        // リセット時に参加ボタンを有効化
+        if (joinRoomButton) joinRoomButton.disabled = false;
+        if (resetGameButton) resetGameButton.disabled = true;
+        // カードと数字のリストもリセット
+        currentBingoCard = [];
+        renderBingoCard(currentBingoCard);
         renderCalledNumbers([]);
         console.log('クライアント側でゲームがリセットされました。');
     });
@@ -133,6 +180,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // joinRoomButtonのイベントリスナーはDOMContentLoaded内で設定
         if (joinRoomButton) {
             joinRoomButton.addEventListener('click', () => {
+                // 既に部屋にいる場合は処理を中断
+                if (currentRoomCode) {
+                    alert('すでに部屋に参加中です!');
+                    return;
+                }
                 const roomCode = roomCodeInput ? roomCodeInput.value.trim() : '';
                 // ここでplayerNameを定義
                 const playerName = document.getElementById('playerNameInput').value.trim();
@@ -149,8 +201,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         renderBingoCard(currentBingoCard);
                         renderCalledNumbers(calledNumbers);
                         if (roomStatus) roomStatus.textContent = `部屋: ${roomCode}に参加中`;
-                        if (generateCardButton) generateCardButton.disabled = false;
-                        if (callNumberButton) callNumberButton.disabled = false;
+                        
+                        // 参加が完了したら参加ボタンと生成ボタンを無効化
+                        if (joinRoomButton) joinRoomButton.disabled = true;
+                        if (generateCardButton) generateCardButton.disabled = true;
                         if (resetGameButton) resetGameButton.disabled = false;
                 } 
             });

@@ -29,6 +29,7 @@ function initializeSession(roomCode) {
             isGameStarted: false,
             isGameEnded: false,
             bingoWinnerId: null,
+            gameMaster: null,
         });
         console.log(`Session initialized for room: ${roomCode}`);
     }

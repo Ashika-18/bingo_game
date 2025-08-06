@@ -22,7 +22,7 @@ export type Player = {
 
 // セッションごとの抽選状態を保持するマップ
 // キーはセッションID (roomCode)、値はそのセッションの抽選状態
-type BingoSession = {
+export type BingoSession = {
     numbers: number[];// 1~75までの数字の配列
     calledNumbers: number[];// 既に呼ばれた数字の配列
     availableNumbers: number[];// まだ呼ばれていない数字の配列
@@ -30,6 +30,7 @@ type BingoSession = {
     isGameStarted: boolean;
     isGameEnded: boolean;
     bingoWinnerId: string | null;
+    gameMaster: string | null;
 };
 
 // --- セッションごとの抽選状態を保持するマップ ---
@@ -52,6 +53,7 @@ export function initializeSession(roomCode: string): BingoSession {
             isGameStarted: false,
             isGameEnded: false,
             bingoWinnerId: null,
+            gameMaster: null,
         });
         console.log(`Session initialized for room: ${roomCode}`);
     }
